@@ -1,0 +1,64 @@
+# ============================================
+# THE HOLD - Docker Compose Configuration
+# ============================================
+
+version: '3.8'
+
+services:
+  # Next.js API Server
+  nextjs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: the-hold-nextjs
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:./data/prod.db
+      - JWT_SECRET=${JWT_SECRET}
+      - IP_HASH_SECRET=${IP_HASH_SECRET}
+      - COUNCIL_EMAIL=${COUNCIL_EMAIL}
+      - COUNCIL_PASSWORD=${COUNCIL_PASSWORD}
+      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://localhost:3001/ws}
+    volumes:
+      - ./data:/app/data
+    networks:
+      - the-hold-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # WebSocket Server
+  websocket:
+    build:
+      context: .
+      dockerfile: Dockerfile.ws
+    container_name: the-hold-websocket
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:./data/prod.db
+      - JWT_SECRET=${JWT_SECRET}
+      - IP_HASH_SECRET=${IP_HASH_SECRET}
+      - WS_PORT=3001
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+    volumes:
+      - ./data:/app/data
+    networks:
+      - the-hold-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  the-hold-network:
+    driver: bridge

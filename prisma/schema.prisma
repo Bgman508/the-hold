@@ -1,0 +1,202 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// THE HOLD - Core Entities
+// ============================================
+
+/// TheHold - Singleton instance representing the space
+model TheHold {
+  id          String   @id @default(cuid())
+  name        String   @default("THE HOLD")
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  moments Moment[]
+
+  @@map("the_hold")
+}
+
+/// Architect - Creators of moments (can be anonymous)
+model Architect {
+  id          String   @id @default(cuid())
+  name        String
+  bio         String?
+  isAnonymous Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  moments Moment[]
+
+  @@index([isAnonymous])
+  @@map("architects")
+}
+
+/// Moment - A held space/session that people can join
+model Moment {
+  id                    String      @id @default(cuid())
+  title                 String
+  description           String?
+  status                MomentStatus @default(draft)
+  
+  // Relations
+  architectId           String
+  architect             Architect   @relation(fields: [architectId], references: [id])
+  theHoldId             String
+  theHold               TheHold     @relation(fields: [theHoldId], references: [id])
+  
+  // Timing
+  startedAt             DateTime?
+  endedAt               DateTime?
+  
+  // Aggregated metrics (no individual tracking)
+  totalMinutesPresent   Int         @default(0)
+  totalSessions         Int         @default(0)
+  peakPresence          Int         @default(0)
+  
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  // Relations
+  sessions  Session[]
+  presences Presence[]
+
+  @@index([status])
+  @@index([theHoldId, status])
+  @@index([startedAt])
+  @@map("moments")
+}
+
+enum MomentStatus {
+  draft
+  live
+  archived
+}
+
+// ============================================
+// Session & Presence (Anonymous Tracking)
+// ============================================
+
+/// Session - Anonymous user session (no PII)
+model Session {
+  id              String   @id @default(cuid())
+  token           String   @unique // JWT token for session validation
+  
+  // Relations
+  momentId        String
+  moment          Moment   @relation(fields: [momentId], references: [id])
+  
+  // Timing
+  startedAt       DateTime @default(now())
+  endedAt         DateTime?
+  durationSeconds Int      @default(0)
+  
+  // Technical data (for stats and abuse detection only)
+  userAgent       String?  // Browser info for analytics
+  ipHash          String?  // Hashed IP for abuse detection (no raw IPs stored)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  presences Presence[]
+
+  @@index([token])
+  @@index([momentId, startedAt])
+  @@index([ipHash])
+  @@map("sessions")
+}
+
+/// Presence - Active WebSocket connection tracking
+model Presence {
+  id              String   @id @default(cuid())
+  
+  // Relations
+  sessionId       String
+  session         Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  momentId        String
+  moment          Moment   @relation(fields: [momentId], references: [id], onDelete: Cascade)
+  
+  // WebSocket identification
+  socketId        String   @unique // Unique socket identifier
+  
+  // Timing
+  connectedAt     DateTime @default(now())
+  lastHeartbeatAt DateTime @default(now())
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([sessionId])
+  @@index([momentId, connectedAt])
+  @@index([socketId])
+  @@index([lastHeartbeatAt])
+  @@map("presences")
+}
+
+// ============================================
+// User Management (RBAC)
+// ============================================
+
+/// User - For Council, Architects with accounts, and Community members
+model User {
+  id           String   @id @default(cuid())
+  role         UserRole @default(COMMUNITY)
+  
+  // Council members have email/password for admin access
+  email        String?  @unique
+  passwordHash String?
+  
+  // Profile (optional, for non-anonymous architects)
+  displayName  String?
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([role])
+  @@index([email])
+  @@map("users")
+}
+
+enum UserRole {
+  COUNCIL    // Administrators with full access
+  ARCHITECT  // Verified moment creators
+  COMMUNITY  // Regular community members
+}
+
+// ============================================
+// Audit & Analytics (Aggregated Only)
+// ============================================
+
+/// DailyStats - Aggregated daily statistics (no individual data)
+model DailyStats {
+  id                String   @id @default(cuid())
+  date              DateTime @unique
+  
+  // Aggregated metrics
+  totalSessions     Int      @default(0)
+  totalMinutes      Int      @default(0)
+  uniqueIpHashes    Int      @default(0) // Count of unique hashed IPs
+  peakConcurrent    Int      @default(0)
+  
+  // Moment breakdown (JSON for flexibility)
+  momentBreakdown   String?  // JSON: { momentId: { sessions, minutes } }
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([date])
+  @@map("daily_stats")
+}
